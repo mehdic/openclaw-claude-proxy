@@ -30,6 +30,7 @@ async function main(): Promise<void> {
     console.error(`Invalid port: ${portSource}`);
     process.exit(1);
   }
+  const host = process.env.CLAUDE_PROXY_HOST || "127.0.0.1";
 
   // Verify Claude CLI
   console.log("Checking Claude CLI...");
@@ -52,7 +53,7 @@ async function main(): Promise<void> {
 
   // Start server
   try {
-    await startServer({ port });
+    await startServer({ port, host });
     // Pre-warm the stream-json init-pool when that mode is the default. Each
     // model gets one already-initialized subprocess so first conversations
     // skip the ~5s init handshake. No-op when default runtime is "print".
@@ -69,7 +70,7 @@ async function main(): Promise<void> {
     emitMcpInjectionWarning();
 
     console.log("\nServer ready. Test with:");
-    console.log(`  curl -X POST http://localhost:${port}/v1/chat/completions \\`);
+    console.log(`  curl -X POST http://${host}:${port}/v1/chat/completions \\`);
     console.log(`    -H "Content-Type: application/json" \\`);
     console.log(`    -d '{"model": "claude-sonnet-4", "messages": [{"role": "user", "content": "Hello!"}]}'`);
     console.log("\nPress Ctrl+C to stop.\n");
