@@ -25,6 +25,8 @@ export function usageFromClaudeResult(result: ClaudeCliResult): ClaudeTokenUsage
 }
 
 export function modelFromResult(result: ClaudeCliResult, requestedModel: string): string {
-  const modelUsageModel = result.modelUsage ? Object.keys(result.modelUsage)[0] : "";
-  return normalizeModel(modelUsageModel || requestedModel);
+  const modelUsageKeys = result.modelUsage ? Object.keys(result.modelUsage) : [];
+  const normalizedRequested = normalizeModel(requestedModel);
+  const matchingModel = modelUsageKeys.find((model) => normalizeModel(model) === normalizedRequested);
+  return normalizeModel(matchingModel || modelUsageKeys[0] || requestedModel);
 }
