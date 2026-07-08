@@ -56,9 +56,11 @@ const MODEL_MAP: Record<string, ClaudeModel> = {
 };
 
 /**
- * Extract Claude model alias from request model string
+ * Resolve a Claude model alias from a request model string.
  */
-export function extractModel(model: string): ClaudeModel {
+export function resolveModel(model: unknown): ClaudeModel | null {
+  if (typeof model !== "string" || !model.trim()) return null;
+
   // Try direct lookup
   if (MODEL_MAP[model]) {
     return MODEL_MAP[model];
@@ -70,8 +72,16 @@ export function extractModel(model: string): ClaudeModel {
     return MODEL_MAP[stripped];
   }
 
-  // Default to opus (Claude Max subscription)
-  return "opus";
+  return null;
+}
+
+/**
+ * Extract Claude model alias from request model string.
+ */
+export function extractModel(model: string): ClaudeModel {
+  const resolved = resolveModel(model);
+  if (!resolved) throw new Error(`Unsupported model: ${String(model)}`);
+  return resolved;
 }
 
 /**
