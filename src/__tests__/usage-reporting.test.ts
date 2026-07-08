@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { cliResultToOpenai, createDoneChunk, resultUsageToOpenAI } from "../adapter/cli-to-openai.js";
-import { annotateClaudeUsage, usageFromClaudeResult } from "../server/usage.js";
+import { annotateClaudeUsage, modelFromResult, usageFromClaudeResult } from "../server/usage.js";
 import { recordTokenUsage, renderMetrics, resetMetrics } from "../server/metrics.js";
 import type { ClaudeCliResult } from "../types/claude-cli.js";
 
@@ -43,6 +43,51 @@ test("annotates OpenAI usage with estimated Claude cost", () => {
   assert.equal(response.usage.estimate_method, "claude_cli_usage");
   assert.equal(response.usage.cost_usd, response.usage.cost?.total_cost_usd);
   assert.equal(response.usage.cost?.model, "claude-sonnet-4-6");
+});
+
+test("OpenAI response model prefers the requested model when Claude reports multiple modelUsage entries", () => {
+  const result = annotateClaudeUsage({
+    ...resultFixture(),
+    modelUsage: {
+      "claude-haiku-4-5-20251001": {
+        inputTokens: 537,
+        outputTokens: 12,
+        costUSD: 0.000597,
+      },
+      "claude-sonnet-4-6": {
+        inputTokens: 3,
+        outputTokens: 14,
+        costUSD: 0.0484512,
+      },
+    },
+  }, "claude-sonnet-4-6");
+  const response = cliResultToOpenai(result, "req1", {
+    model: "claude-sonnet-4-6",
+    messages: [{ role: "user", content: "hi" }],
+  } as Parameters<typeof cliResultToOpenai>[2]);
+
+  assert.equal(response.model, "claude-sonnet-4");
+  assert.equal(response.usage.cost?.model, "claude-sonnet-4-6");
+});
+
+test("usage model selection prefers requested model when modelUsage contains warmup entries first", () => {
+  const result: ClaudeCliResult = {
+    ...resultFixture(),
+    modelUsage: {
+      "claude-haiku-4-5-20251001": {
+        inputTokens: 537,
+        outputTokens: 12,
+        costUSD: 0.000597,
+      },
+      "claude-sonnet-4-6": {
+        inputTokens: 3,
+        outputTokens: 14,
+        costUSD: 0.0484512,
+      },
+    },
+  };
+
+  assert.equal(modelFromResult(result, "claude-sonnet-4-6"), "claude-sonnet-4-6");
 });
 
 test("final streaming chunk can carry usage when include_usage-compatible clients ask for it", () => {

@@ -117,12 +117,10 @@ export function createToolCallChunks(
 export function cliResultToOpenai(
   result: ClaudeCliResult,
   requestId: string,
-  toolRequest?: Pick<OpenAIChatRequest, "tools" | "tool_choice">,
+  toolRequest?: Pick<OpenAIChatRequest, "model" | "tools" | "tool_choice">,
 ): OpenAIChatResponse {
   // Get model from modelUsage or default
-  const modelName = result.modelUsage
-    ? Object.keys(result.modelUsage)[0]
-    : "claude-sonnet-4";
+  const modelName = selectResponseModel(result, toolRequest?.model);
 
   const usage = resultUsageToOpenAI(result);
   const rawText = ensureString(result.result);
@@ -199,4 +197,13 @@ function normalizeModelName(model: string | undefined): string {
   if (model.includes("sonnet")) return "claude-sonnet-4";
   if (model.includes("haiku")) return "claude-haiku-4";
   return model;
+}
+
+function selectResponseModel(result: ClaudeCliResult, requestedModel?: string): string {
+  const modelUsageKeys = result.modelUsage ? Object.keys(result.modelUsage) : [];
+  const requestedFamily = normalizeModelName(requestedModel);
+  const matchingModel = requestedModel
+    ? modelUsageKeys.find((model) => normalizeModelName(model) === requestedFamily)
+    : undefined;
+  return matchingModel || modelUsageKeys[0] || requestedModel || "claude-sonnet-4";
 }
