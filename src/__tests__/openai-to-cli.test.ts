@@ -1,10 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractModel, messagesToPrompt, openaiToCli } from "../adapter/openai-to-cli.js";
+import { extractModel, messagesToPrompt, openaiToCli, resolveModel } from "../adapter/openai-to-cli.js";
 import type { OpenAIChatRequest } from "../types/openai.js";
 
-test("extractModel defaults unknown model ids to opus", () => {
-  assert.equal(extractModel("not-a-real-model"), "opus");
+test("resolveModel rejects unknown model ids", () => {
+  assert.equal(resolveModel("not-a-real-model"), null);
+});
+
+test("resolveModel rejects missing model ids", () => {
+  assert.equal(resolveModel(undefined), null);
+  assert.equal(resolveModel(""), null);
+});
+
+test("extractModel throws for unknown model ids", () => {
+  assert.throws(() => extractModel("not-a-real-model"), /Unsupported model/);
 });
 
 test("extractModel strips claude-code-cli provider prefix", () => {

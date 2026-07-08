@@ -19,7 +19,7 @@ import {
   type StickyEvictionReason,
 } from "../subprocess/sticky-session-pool.js";
 import { resolveSessionOptions, isSessionOptionsError, type ResolvedSessionOptions, type SessionOptionsError } from "./sticky-options.js";
-import { extractModel, messagesToPrompt, openaiToCli } from "../adapter/openai-to-cli.js";
+import { extractModel, messagesToPrompt, openaiToCli, resolveModel } from "../adapter/openai-to-cli.js";
 import {
   cliResultToOpenai,
   createDoneChunk,
@@ -78,6 +78,29 @@ function classifyAndRecordError(err: unknown): ProtocolErrorClass {
   const cls = classifyError(err);
   recordErrorClass(cls);
   return cls;
+}
+
+function requestedModelLabel(model: unknown): string {
+  return typeof model === "string" && model.trim() ? model : "unknown";
+}
+
+function invalidModelMessage(model: unknown): string {
+  return typeof model === "string" && model.trim()
+    ? `unsupported model: ${model}`
+    : "model is required and must be a supported model id";
+}
+
+function sendInvalidModel(res: Response, tb: TraceBuilder, model: unknown): void {
+  const message = invalidModelMessage(model);
+  tb.setError("invalid_request", message);
+  tb.commit();
+  res.status(400).json({
+    error: {
+      message,
+      type: "invalid_request_error",
+      code: "invalid_model",
+    },
+  });
 }
 
 /**
@@ -318,16 +341,17 @@ export async function handleChatCompletions(
 ): Promise<void> {
   const requestId = uuidv4().replace(/-/g, "").slice(0, 24);
   const traceId = `trc_${requestId}`;
-  const body = req.body as OpenAIChatRequest;
+  const body = (req.body || {}) as OpenAIChatRequest;
   const stream = body.stream === true;
   const reqStart = Date.now();
   let usedRuntime: "stream-json" | "print" = "stream-json";
+  const resolvedModel = resolveModel(body.model);
 
   const tb = createTraceBuilder({
     traceId,
     requestId,
-    model: extractModel(body.model),
-    requestedModel: body.model || "unknown",
+    model: resolvedModel || "unknown",
+    requestedModel: requestedModelLabel(body.model),
     stream,
     endpoint: "chat.completions",
   });
@@ -341,6 +365,11 @@ export async function handleChatCompletions(
   });
 
   try {
+    if (!resolvedModel) {
+      sendInvalidModel(res, tb, body.model);
+      return;
+    }
+
     // Validate request
     if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
       tb.setError("invalid_request", "messages is required and must be a non-empty array");
@@ -385,9 +414,8 @@ export async function handleChatCompletions(
     if (process.env.DEBUG) console.error(`[runtime] resolved=${runtime} req_id=${requestId}`);
 
     if (runtime === "stream-json") {
-      const model = extractModel(body.model);
       try {
-        await handleStreamJsonRequest(req, res, model, body, requestId, stream, tb, sessionOptions);
+        await handleStreamJsonRequest(req, res, resolvedModel, body, requestId, stream, tb, sessionOptions);
         return;
       } catch (err) {
         if (isStickyBusyError(err)) {
@@ -1202,16 +1230,17 @@ export async function handleResponses(
 ): Promise<void> {
   const requestId = uuidv4().replace(/-/g, "").slice(0, 24);
   const traceId = `trc_${requestId}`;
-  const body = req.body as ResponsesRequest;
+  const body = (req.body || {}) as ResponsesRequest;
   const stream = body.stream === true;
   const reqStart = Date.now();
   let usedRuntime: "stream-json" | "print" = "print";
+  const resolvedModel = resolveModel(body.model);
 
   const tb = createTraceBuilder({
     traceId,
     requestId,
-    model: extractModel(body.model),
-    requestedModel: body.model || "unknown",
+    model: resolvedModel || "unknown",
+    requestedModel: requestedModelLabel(body.model),
     stream,
     endpoint: "responses",
   });
@@ -1222,6 +1251,11 @@ export async function handleResponses(
   });
 
   try {
+    if (!resolvedModel) {
+      sendInvalidModel(res, tb, body.model);
+      return;
+    }
+
     // Validate: input is required
     if (body.input === undefined || body.input === null) {
       tb.setError("invalid_request", "input is required");
