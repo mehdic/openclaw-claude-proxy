@@ -106,6 +106,14 @@ Two Claude subprocess strategies are available:
 
 In `stream-json`, Claude Code may intentionally park a turn with `ScheduleWakeup`, `Monitor`, or `TaskOutput` while background work finishes. The proxy treats the strict interim text `Sleeping the loop. Will resume when ...` as an intentional wait, keeps the worker busy/out of the pool, keeps the SSE stream alive, and finalizes only on a later real result/error or the absolute cap. `/v1/chat/completions` emits progress as chat delta chunks; `/v1/responses` emits proxy progress as `response.in_progress` lifecycle events so `response.output_text.delta` still matches the final `response.output_text.done` text.
 
+Runtime-phase narration (`🫧 Working: thinking…`, tool_use start/wait) is visible assistant content, so like liveness and interim narration it is opt-in — plain OpenAI-compatible clients treat every `delta.content` as answer text and would otherwise save the narration into the output. All three default off; when off the keepalive falls through to a standards-compliant SSE comment that keeps the socket warm without polluting the assistant text:
+
+```bash
+CLAUDE_PROXY_PHASE_PROGRESS=1              # 🫧 tool/thinking phase narration
+CLAUDE_PROXY_LIVENESS_PROGRESS=1           # periodic liveness heartbeat
+CLAUDE_PROXY_INTERIM_NARRATION_PROGRESS=1  # 🧠 interim thinking text
+```
+
 See [Configuration](docs/configuration.md#runtime) and [Scheduled wakeup / background-task waits](docs/configuration.md#scheduled-wakeup--background-task-waits) for details.
 
 ## Sticky sessions

@@ -118,6 +118,15 @@ export function interimNarrationProgressEnabled(env: NodeJS.ProcessEnv = process
   return env.CLAUDE_PROXY_INTERIM_NARRATION_PROGRESS === "1";
 }
 
+// Runtime-phase narration ("🫧 Working: thinking…", tool_use start/wait) is
+// visible assistant content, so like liveness/interim narration it must be
+// opt-in: plain OpenAI-compatible clients treat every delta.content as answer
+// text and would otherwise save the narration into the output. Off by default
+// ⇒ the keepalive falls through to a standards-compliant SSE comment.
+export function phaseProgressEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.CLAUDE_PROXY_PHASE_PROGRESS === "1";
+}
+
 function endsAtNaturalNarrationBoundary(text: string): boolean {
   return /(?:[.!?…][)"'\]]*|\n)\s*$/.test(text);
 }
@@ -851,7 +860,7 @@ async function handleStreamJsonRequest(
     }
 
     // Priority 2: Claude runtime phase (tool_use start, tool wait).
-    if (!hasRenderableAssistantContent(content)) {
+    if (!hasRenderableAssistantContent(content) && phaseProgressEnabled()) {
       const phase = phaseTracker.poll();
       if (phase) {
         content = "\n" + phase.text + "\n";
@@ -1459,7 +1468,7 @@ async function handleResponsesStreamJson(
       }
     }
 
-    if (!hasRenderableAssistantContent(content)) {
+    if (!hasRenderableAssistantContent(content) && phaseProgressEnabled()) {
       const phase = phaseTracker.poll();
       if (phase) {
         content = "\n" + phase.text + "\n";

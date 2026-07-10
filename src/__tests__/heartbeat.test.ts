@@ -17,6 +17,7 @@ import {
   hasRenderableAssistantContent,
   interimNarrationProgressEnabled,
   livenessProgressEnabled,
+  phaseProgressEnabled,
   shouldSuppressSoftDeadForIntentionalWait,
 } from "../server/routes.js";
 import { attachPhaseTracker } from "../server/phase-tracker.js";
@@ -42,6 +43,12 @@ test("interim narration progress is disabled by default and opt-in by env", () =
   assert.equal(interimNarrationProgressEnabled({}), false);
   assert.equal(interimNarrationProgressEnabled({ CLAUDE_PROXY_INTERIM_NARRATION_PROGRESS: "0" }), false);
   assert.equal(interimNarrationProgressEnabled({ CLAUDE_PROXY_INTERIM_NARRATION_PROGRESS: "1" }), true);
+});
+
+test("phase progress is disabled by default and opt-in by env", () => {
+  assert.equal(phaseProgressEnabled({}), false);
+  assert.equal(phaseProgressEnabled({ CLAUDE_PROXY_PHASE_PROGRESS: "0" }), false);
+  assert.equal(phaseProgressEnabled({ CLAUDE_PROXY_PHASE_PROGRESS: "1" }), true);
 });
 
 test("interim narration progress wraps text as progress, not plain assistant text", () => {
