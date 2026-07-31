@@ -5,6 +5,7 @@
 import type { ClaudeCliAssistant, ClaudeCliResult } from "../types/claude-cli.js";
 import type { OpenAIChatRequest, OpenAIChatResponse, OpenAIChatChunk, OpenAIUsage, OpenAIToolCall } from "../types/openai.js";
 import { parseToolCalls, shouldBridgeExternalTools } from "./tools.js";
+import { pickModelFromUsage } from "../server/usage.js";
 
 /**
  * Extract text content from Claude CLI assistant message
@@ -118,11 +119,12 @@ export function cliResultToOpenai(
   result: ClaudeCliResult,
   requestId: string,
   toolRequest?: Pick<OpenAIChatRequest, "tools" | "tool_choice">,
+  requestedModel?: string,
 ): OpenAIChatResponse {
-  // Get model from modelUsage or default
-  const modelName = result.modelUsage
-    ? Object.keys(result.modelUsage)[0]
-    : "claude-sonnet-4";
+  // Same selection logic as usage.ts::modelFromResult -- prefer the requested model, else
+  // the entry with the biggest token/cost share. Previously: Object.keys(modelUsage)[0],
+  // which occasionally picked up a small internal side call (e.g. Haiku) instead.
+  const modelName = pickModelFromUsage(result.modelUsage, requestedModel ?? "") || requestedModel || "claude-sonnet-4";
 
   const usage = resultUsageToOpenAI(result);
   const rawText = ensureString(result.result);
