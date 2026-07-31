@@ -655,7 +655,7 @@ async function handleNonStreamingResponse(
       if (finalResult) {
         annotateAndRecordUsage(finalResult, cliInput.model);
         setUsageHeaders(res, finalResult);
-        const response = cliResultToOpenai(finalResult, requestId, body);
+        const response = cliResultToOpenai(finalResult, requestId, body, cliInput.model);
         const finishReason = response.choices[0]?.finish_reason || "stop";
         tb.setFinishReason(finishReason as "stop" | "tool_calls");
         if (response.choices[0]?.message.tool_calls) {
@@ -1112,7 +1112,7 @@ async function handleStreamJsonRequest(
       res.end();
     } else if (!stream && !res.headersSent) {
       setUsageHeaders(res, result);
-      res.json(cliResultToOpenai(result, requestId, body));
+      res.json(cliResultToOpenai(result, requestId, body, model));
     }
 
     // Re-pool or retain the subprocess for the next turn according to session mode.
@@ -1676,7 +1676,7 @@ async function handleResponsesStreamJson(
       res.write("data: [DONE]\n\n");
       res.end();
     } else if (!stream && !res.headersSent) {
-      const chatResponse = cliResultToOpenai(resultForAdapters, requestId, chatReq);
+      const chatResponse = cliResultToOpenai(resultForAdapters, requestId, chatReq, cliInput.model);
       res.json(chatResponseToResponses(chatResponse, requestId));
     }
   } catch (error) {
@@ -1737,7 +1737,7 @@ async function handleResponsesNonStreaming(
     subprocess.on("close", (code: number | null) => {
       if (finalResult) {
         annotateAndRecordUsage(finalResult, cliInput.model);
-        const chatResponse = cliResultToOpenai(finalResult, requestId, chatReq);
+        const chatResponse = cliResultToOpenai(finalResult, requestId, chatReq, cliInput.model);
         const responsesResponse = chatResponseToResponses(chatResponse, requestId);
         const hasToolCalls = chatResponse.choices[0]?.message?.tool_calls && chatResponse.choices[0].message.tool_calls.length > 0;
         const finishReason = hasToolCalls ? "tool_calls" as const : (chatResponse.choices[0]?.finish_reason as "stop" | "tool_calls" || "stop");

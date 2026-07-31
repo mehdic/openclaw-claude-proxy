@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { cliResultToOpenai, createDoneChunk, resultUsageToOpenAI } from "../adapter/cli-to-openai.js";
-import { annotateClaudeUsage, usageFromClaudeResult } from "../server/usage.js";
+import { annotateClaudeUsage, modelFromResult, usageFromClaudeResult } from "../server/usage.js";
 import { recordTokenUsage, renderMetrics, resetMetrics } from "../server/metrics.js";
 import type { ClaudeCliResult } from "../types/claude-cli.js";
 
@@ -52,6 +52,42 @@ test("final streaming chunk can carry usage when include_usage-compatible client
   assert.equal(chunk.choices[0].finish_reason, "stop");
   assert.equal(chunk.usage?.prompt_tokens, 1_300);
   assert.equal(chunk.usage?.cost?.model, "claude-sonnet-4-6");
+});
+
+test("modelFromResult picks the requested model, not the first modelUsage key", () => {
+  // Regression test: the Claude CLI occasionally makes a small internal side call (e.g.
+  // claude-haiku-4-5) in addition to the actual response call. modelUsage is a dict in
+  // insertion order, so the side call's key can land before the main call's key.
+  // Object.keys(modelUsage)[0] used to report the side model even though the main call
+  // (here: 97%+ of the cost) produced the response.
+  const result: ClaudeCliResult = {
+    ...resultFixture(),
+    modelUsage: {
+      "claude-haiku-4-5-20251001": { inputTokens: 532, outputTokens: 12, costUSD: 0.000592 },
+      "claude-sonnet-4-6": { inputTokens: 2, outputTokens: 7, costUSD: 0.0205011 },
+    },
+  };
+
+  assert.equal(modelFromResult(result, "claude-sonnet-4-6"), "claude-sonnet-4-6");
+
+  const response = cliResultToOpenai(result, "req1", undefined, "claude-sonnet-4-6");
+  assert.equal(response.model, "claude-sonnet-4");
+});
+
+test("modelFromResult falls back to the biggest modelUsage entry when the requested model is absent", () => {
+  const result: ClaudeCliResult = {
+    ...resultFixture(),
+    modelUsage: {
+      "claude-haiku-4-5-20251001": { inputTokens: 532, outputTokens: 12, costUSD: 0.000592 },
+      "claude-sonnet-4-6": { inputTokens: 2, outputTokens: 7, costUSD: 0.0205011 },
+    },
+  };
+
+  // Requested model is not a key in modelUsage at all -- fall back to the entry with the
+  // highest cost (sonnet: $0.0205 vs haiku: $0.0006) instead of Object.keys()[0]. Cost is
+  // used over raw token count here because inputTokens/outputTokens do not include the
+  // cache-read/cache-creation activity that made the sonnet call expensive in the first place.
+  assert.equal(modelFromResult(result, "claude-opus-5"), "claude-sonnet-4-6");
 });
 
 test("token and estimated cost metrics are rendered with bounded labels", () => {
