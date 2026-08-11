@@ -4,6 +4,7 @@
 
 import type { OpenAIChatRequest, OpenAIMessageContent } from "../types/openai.js";
 import { toolDefsToPrompt, toolResultToPrompt, assistantToolCallsToPrompt, shouldBridgeExternalTools, externalNativeToolDisallowList } from "./tools.js";
+import { isPassthroughModelId, registryEntry, stripProviderPrefix } from "../models.js";
 
 export type ClaudeModel = "opus" | "sonnet" | "haiku" | string;
 
@@ -14,60 +15,35 @@ export interface CliInput {
   disallowedTools?: string[];
 }
 
-const MODEL_MAP: Record<string, ClaudeModel> = {
-  // Direct model names
-  "claude-opus-4": "opus",
-  "claude-sonnet-4": "sonnet",
-  "claude-haiku-4": "haiku",
-  // 4.5+ generation (exact ids passed straight through to claude CLI's --model)
-  "claude-opus-4-8": "claude-opus-4-8",
-  "claude-opus-4-7": "claude-opus-4-7",
-  "claude-opus-4-6": "claude-opus-4-6",
-  "claude-sonnet-4-6": "claude-sonnet-4-6",
-  "claude-sonnet-4-5": "claude-sonnet-4-5",
-  "claude-haiku-4-5": "claude-haiku-4-5",
-  "claude-haiku-4-5-20251001": "claude-haiku-4-5-20251001",
-  // With provider prefix (claude-code-cli/)
-  "claude-code-cli/claude-opus-4": "opus",
-  "claude-code-cli/claude-sonnet-4": "sonnet",
-  "claude-code-cli/claude-haiku-4": "haiku",
-  "claude-code-cli/claude-opus-4-8": "claude-opus-4-8",
-  "claude-code-cli/claude-opus-4-7": "claude-opus-4-7",
-  "claude-code-cli/claude-opus-4-6": "claude-opus-4-6",
-  "claude-code-cli/claude-sonnet-4-6": "claude-sonnet-4-6",
-  "claude-code-cli/claude-sonnet-4-5": "claude-sonnet-4-5",
-  "claude-code-cli/claude-haiku-4-5": "claude-haiku-4-5",
-  "claude-code-cli/claude-haiku-4-5-20251001": "claude-haiku-4-5-20251001",
-  // With provider prefix (claude-proxy/)
-  "claude-proxy/claude-opus-4": "opus",
-  "claude-proxy/claude-sonnet-4": "sonnet",
-  "claude-proxy/claude-haiku-4": "haiku",
-  "claude-proxy/claude-opus-4-8": "claude-opus-4-8",
-  "claude-proxy/claude-opus-4-7": "claude-opus-4-7",
-  "claude-proxy/claude-opus-4-6": "claude-opus-4-6",
-  "claude-proxy/claude-sonnet-4-6": "claude-sonnet-4-6",
-  "claude-proxy/claude-sonnet-4-5": "claude-sonnet-4-5",
-  "claude-proxy/claude-haiku-4-5": "claude-haiku-4-5",
-  "claude-proxy/claude-haiku-4-5-20251001": "claude-haiku-4-5-20251001",
-  // Short aliases
-  "opus": "opus",
-  "sonnet": "sonnet",
-  "haiku": "haiku",
-};
+// Short aliases the Claude CLI resolves itself (always to the latest model
+// of that family for the account's subscription).
+const SHORT_ALIASES = new Set(["opus", "sonnet", "haiku"]);
 
 /**
- * Extract Claude model alias from request model string
+ * Extract Claude model alias from request model string.
+ *
+ * Resolution order:
+ *   1. Short aliases (opus/sonnet/haiku) pass through — the CLI resolves them.
+ *   2. Registry ids (with or without a claude-proxy/ or claude-code-cli/
+ *      prefix) resolve to their configured `claude --model` target.
+ *   3. Unknown-but-plausible `claude-*` ids pass through verbatim, so newly
+ *      released models are routable without a proxy release.
+ *   4. Everything else defaults to opus (Claude Max subscription).
  */
 export function extractModel(model: string): ClaudeModel {
-  // Try direct lookup
-  if (MODEL_MAP[model]) {
-    return MODEL_MAP[model];
+  const stripped = stripProviderPrefix(model);
+
+  if (SHORT_ALIASES.has(stripped)) {
+    return stripped;
   }
 
-  // Try stripping provider prefix
-  const stripped = model.replace(/^claude-code-cli\//, "");
-  if (MODEL_MAP[stripped]) {
-    return MODEL_MAP[stripped];
+  const entry = registryEntry(stripped);
+  if (entry) {
+    return entry.cliTarget;
+  }
+
+  if (isPassthroughModelId(stripped)) {
+    return stripped;
   }
 
   // Default to opus (Claude Max subscription)

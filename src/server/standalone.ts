@@ -58,7 +58,7 @@ async function main(): Promise<void> {
     // model gets one already-initialized subprocess so first conversations
     // skip the ~5s init handshake. No-op when default runtime is "print".
     if (defaultRuntime() === "stream-json") {
-      const models = (process.env.CLAUDE_PROXY_PREWARM_MODELS || "claude-opus-4-7,claude-sonnet-4-6,claude-haiku-4-5-20251001")
+      const models = (process.env.CLAUDE_PROXY_PREWARM_MODELS || "claude-opus-5,claude-sonnet-5,claude-haiku-4-5-20251001")
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean);

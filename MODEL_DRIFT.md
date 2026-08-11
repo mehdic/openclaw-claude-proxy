@@ -1,53 +1,54 @@
-# Model-map drift audit — 2026-04-29
+# Model registry — single source of truth (supersedes the 2026-04-29 drift audit)
 
-Three sources of truth declare which Claude model ids the proxy supports. They MUST agree, but currently don't. This file surfaces the drift so the operator can decide what to do — **the harden/review-fixes branch deliberately does not silently reconcile them**.
+The drift documented in the original version of this file is resolved. All
+model lists now derive from **one registry**: `MODEL_REGISTRY` in
+`src/models.ts`.
 
-| Source | File | Purpose |
+| Consumer | File | Derivation |
 |---|---|---|
-| `MODEL_MAP` | `src/adapter/openai-to-cli.ts` | Maps incoming client model strings → `claude --model` values |
-| `AVAILABLE_MODELS` | `src/index.ts` | What the openclaw plugin entry exposes via `buildModelDefinition()` |
-| `handleModels` ids list | `src/server/routes.ts` | Response body for `GET /models` and `GET /v1/models` |
+| `extractModel` | `src/adapter/openai-to-cli.ts` | registry lookup (both provider prefixes) + passthrough |
+| `AVAILABLE_MODELS` | `src/index.ts` | `MODEL_REGISTRY.filter(m => m.advertised)` |
+| `handleModels` (`GET /models`, `/v1/models`) | `src/server/routes.ts` | `advertisedModelIds()` + live discovery |
+| `/metrics` model labels | `src/models.ts` `canonicalizeModelLabel` | all registry ids + discovered ids |
 
-## Drift table
+## Adding a new model
 
-| Model id | MODEL_MAP | AVAILABLE_MODELS | handleModels |
-|---|:-:|:-:|:-:|
-| `claude-opus-4-7` | ✅ | ✅ | ✅ |
-| `claude-opus-4-6` | ✅ | ✅ | ✅ |
-| `claude-opus-4` (alias) | ✅ | ✅ | ✅ |
-| `claude-sonnet-4-6` | ✅ | ✅ | ✅ |
-| `claude-sonnet-4-5` | ✅ | ❌ | ❌ |
-| `claude-sonnet-4` (alias) | ✅ | ❌ | ✅ |
-| `claude-haiku-4-5-20251001` | ✅ | ✅ | ✅ |
-| `claude-haiku-4-5` | ✅ | ❌ | ❌ |
-| `claude-haiku-4` (alias) | ✅ | ❌ | ✅ |
+Add **one entry** to `MODEL_REGISTRY` in `src/models.ts` (id, name,
+cliTarget, reasoning, contextWindow, advertised) and, if the price differs
+from its family, a row in `FALLBACK_PRICING` + a `normalizeModel` prefix
+rule in `src/server/pricing.ts`. Nothing else to keep in sync;
+`src/__tests__/model-drift.test.ts` validates the derivations.
 
-## What the drift means in practice
+## Future models work without a release
 
-- **`claude-sonnet-4-5`** and **`claude-haiku-4-5`** — accepted by the adapter (a request with these ids would be routed to `claude --model claude-sonnet-4-5`), but **invisible**: not advertised in the openclaw plugin's provider definitions and not returned by `GET /models`. A client that hardcodes these ids works; one that discovers via `/models` never sees them.
-- **`claude-sonnet-4`** and **`claude-haiku-4`** legacy aliases — discoverable via `/models` and routed by the adapter, but **missing from the openclaw plugin definitions**, so an openclaw deployment that uses the bundled plugin (rather than declaring `claude-proxy` manually) won't see them.
+Two mechanisms make unreleased models usable the day Anthropic ships them:
 
-## Decisions for the operator
+1. **Verbatim passthrough (routing).** Any request model matching
+   `claude-*` that isn't in the registry is passed straight to
+   `claude --model <id>`. The Claude CLI/API is the final validator. So
+   `claude-opus-6` works as soon as the installed Claude CLI supports it.
+   Non-`claude-*` ids still default to `opus`.
+2. **Live discovery (listing, optional).** When `ANTHROPIC_API_KEY` is set,
+   `GET /models` merges ids from the Anthropic Models API
+   (`https://api.anthropic.com/v1/models`) into the static list
+   (`src/server/model-discovery.ts`; cached 1 h, 5 min backoff on failure,
+   silent fallback to the static list). Discovered ids also become valid
+   `/metrics` labels (bounded — the API list is finite). Disable with
+   `CLAUDE_PROXY_MODEL_DISCOVERY=off`. Without an API key (plain Claude
+   Max subscription auth) discovery is skipped and the static registry
+   list is served.
 
-Pick one for each row. None of these are bugs that block stream-json or the hardening fixes — they're scope creep accumulated over several PRs.
+## Metrics cardinality
 
-1. **Hide the unused 4-5 models** — remove `claude-sonnet-4-5` / `claude-haiku-4-5` from `MODEL_MAP` if you don't actually want them callable.
-2. **Promote them** — add to `AVAILABLE_MODELS` and `handleModels` if you do.
-3. **Drop the prior-generation aliases** (`claude-sonnet-4`, `claude-haiku-4`) — if you don't care about those any more, remove them from MODEL_MAP and handleModels.
-4. **Promote the aliases** — add them to `AVAILABLE_MODELS` so the openclaw plugin advertises them.
+`canonicalizeModelLabel` labels registry ids and discovered ids as
+themselves; everything else collapses to `"other"`. Passthrough-routing a
+model does **not** create a new metrics label — only registry membership or
+API discovery does, so cardinality stays bounded.
 
-The harden/review-fixes branch leaves all three lists exactly as they were on `main` so this audit can be discussed and resolved separately. Touch `MODEL_MAP` / `AVAILABLE_MODELS` / `handleModels` together when you do reconcile — that's the recipe in `infra/claude-proxy.md` ("Adding a new claude model").
+## Hidden models
 
-## Automated drift test (v1.0.4+)
-
-`src/__tests__/model-drift.test.ts` validates synchronization across all four sources of truth on every `npm test` run:
-
-1. Every `handleModels` id is routable via `MODEL_MAP`.
-2. Every `AVAILABLE_MODELS` id is in `handleModels`.
-3. Every `AVAILABLE_MODELS` id is routable via `MODEL_MAP`.
-4. `KNOWN_MODEL_LABELS` covers all `handleModels` ids (prevents `/metrics` cardinality leaks).
-5. Provider-prefixed variants (`claude-proxy/`, `claude-code-cli/`) resolve identically to bare ids.
-
-An informational log line lists MODEL_MAP entries that are routable but not advertised — this is non-fatal and expected for hidden/deprecated models. Promote or remove as needed.
-
-**When adding a new model:** update MODEL_MAP, AVAILABLE_MODELS, handleModels ids, KNOWN_MODEL_LABELS, AND the mirror arrays in `model-drift.test.ts`. The test will fail until all are in sync.
+`claude-sonnet-4-5` and `claude-haiku-4-5` remain routable but
+unadvertised (`advertised: false`) — same behavior as before the refactor.
+The legacy aliases (`claude-opus-4`, `claude-sonnet-4`, `claude-haiku-4`)
+are now advertised everywhere (previously `claude-haiku-4` was missing from
+the openclaw plugin definitions — that drift is gone).

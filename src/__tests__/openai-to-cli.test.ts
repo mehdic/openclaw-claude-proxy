@@ -15,6 +15,18 @@ test("extractModel accepts claude-proxy provider prefix", () => {
   assert.equal(extractModel("claude-proxy/claude-opus-4-8"), "claude-opus-4-8");
 });
 
+test("extractModel routes current-generation models", () => {
+  assert.equal(extractModel("claude-fable-5"), "claude-fable-5");
+  assert.equal(extractModel("claude-opus-5"), "claude-opus-5");
+  assert.equal(extractModel("claude-sonnet-5"), "claude-sonnet-5");
+  assert.equal(extractModel("claude-code-cli/claude-opus-5"), "claude-opus-5");
+});
+
+test("extractModel passes unknown claude-* ids through verbatim", () => {
+  assert.equal(extractModel("claude-opus-6"), "claude-opus-6");
+  assert.equal(extractModel("claude-proxy/claude-fable-6-20270101"), "claude-fable-6-20270101");
+});
+
 test("messagesToPrompt joins text content parts with newlines", () => {
   const prompt = messagesToPrompt([
     { role: "user", content: [{ type: "text", text: "first" }, { type: "text", text: "second" }] },
