@@ -6,7 +6,11 @@ test("normalizes Claude provider prefixes and date suffixes for pricing", () => 
   assert.equal(normalizeModel("anthropic/claude-sonnet-4-6-20260217"), "claude-sonnet-4-6");
   assert.equal(normalizeModel("claude-proxy/claude-haiku-4-5-20251001"), "claude-haiku-4-5");
   assert.equal(normalizeModel("claude-proxy/claude-opus-4-8"), "claude-opus-4-8");
-  assert.equal(normalizeModel("sonnet"), "claude-sonnet-4-6");
+  assert.equal(normalizeModel("sonnet"), "claude-sonnet-5");
+  assert.equal(normalizeModel("opus"), "claude-opus-5");
+  assert.equal(normalizeModel("claude-proxy/claude-opus-5"), "claude-opus-5");
+  assert.equal(normalizeModel("claude-fable-5"), "claude-fable-5");
+  assert.equal(normalizeModel("claude-mythos-5"), "claude-fable-5");
 });
 
 test("estimates Claude token cost with cache read and cache creation rates", () => {
@@ -28,6 +32,11 @@ test("estimates Claude token cost with cache read and cache creation rates", () 
 
 test("pricing snapshot exposes an Anthropic pricing book", () => {
   const snapshot = pricingSnapshot();
+  assert.equal(snapshot.models["claude-fable-5"].inputPer1M, 10);
+  assert.equal(snapshot.models["claude-fable-5"].outputPer1M, 50);
+  assert.equal(snapshot.models["claude-opus-5"].inputPer1M, 5);
+  assert.equal(snapshot.models["claude-opus-5"].outputPer1M, 25);
+  assert.equal(snapshot.models["claude-sonnet-5"].inputPer1M, 3);
   assert.equal(snapshot.models["claude-opus-4-8"].inputPer1M, 5);
   assert.equal(snapshot.models["claude-opus-4-7"].inputPer1M, 5);
   assert.equal(snapshot.models["claude-haiku-4-5"].outputPer1M, 5);

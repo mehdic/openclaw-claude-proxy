@@ -55,6 +55,30 @@ const FALLBACK_PRICING: PricingBook = {
   updatedAt: DEFAULT_UPDATED_AT,
   source: "static fallback from Anthropic public pricing; refresh with scripts/update-pricing.mjs",
   models: {
+    "claude-fable-5": {
+      inputPer1M: 10,
+      cacheCreationInputPer1M: 12.5,
+      cachedInputPer1M: 1,
+      outputPer1M: 50,
+      source: "Anthropic Claude Fable 5 public product/pricing page",
+      updatedAt: "2026-08-11",
+    },
+    "claude-opus-5": {
+      inputPer1M: 5,
+      cacheCreationInputPer1M: 6.25,
+      cachedInputPer1M: 0.5,
+      outputPer1M: 25,
+      source: "Anthropic Claude Opus 5 public product/pricing page",
+      updatedAt: "2026-08-11",
+    },
+    "claude-sonnet-5": {
+      inputPer1M: 3,
+      cacheCreationInputPer1M: 3.75,
+      cachedInputPer1M: 0.3,
+      outputPer1M: 15,
+      source: "Anthropic Claude Sonnet 5 public pricing (standard rate; intro pricing through 2026-08-31 not modeled)",
+      updatedAt: "2026-08-11",
+    },
     "claude-opus-4-8": {
       inputPer1M: 5,
       cacheCreationInputPer1M: 6.25,
@@ -199,9 +223,13 @@ export function normalizeModel(model: string): string {
     .replace(/^(anthropic|claude-proxy|claude-code-cli|openrouter\/anthropic)\//, "")
     .trim();
 
-  if (stripped === "opus") return "claude-opus-4-6";
-  if (stripped === "sonnet") return "claude-sonnet-4-6";
+  if (stripped === "opus") return "claude-opus-5";
+  if (stripped === "sonnet") return "claude-sonnet-5";
   if (stripped === "haiku") return "claude-haiku-4-5";
+  if (/^claude-fable-5/.test(stripped)) return "claude-fable-5";
+  if (/^claude-mythos-5/.test(stripped)) return "claude-fable-5"; // same pricing tier
+  if (/^claude-opus-5/.test(stripped)) return "claude-opus-5";
+  if (/^claude-sonnet-5/.test(stripped)) return "claude-sonnet-5";
   if (/^claude-opus-4-8/.test(stripped)) return "claude-opus-4-8";
   if (/^claude-opus-4-7/.test(stripped)) return "claude-opus-4-7";
   if (/^claude-opus-4-6/.test(stripped)) return "claude-opus-4-6";
@@ -235,9 +263,10 @@ function mergePricing(base: PricingBook, external: PricingBook | null): PricingB
 }
 
 function inferPrice(model: string, book: PricingBook): ModelPrice {
-  if (model.includes("opus")) return book.models["claude-opus-4-6"];
+  if (model.includes("fable") || model.includes("mythos")) return book.models["claude-fable-5"];
+  if (model.includes("opus")) return book.models["claude-opus-5"];
   if (model.includes("haiku")) return book.models["claude-haiku-4-5"];
-  return book.models["claude-sonnet-4-6"];
+  return book.models["claude-sonnet-5"];
 }
 
 function roundUsd(value: number): number {

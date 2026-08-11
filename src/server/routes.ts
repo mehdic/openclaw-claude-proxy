@@ -36,6 +36,8 @@ import { resolveRuntime, defaultRuntime } from "../subprocess/runtime.js";
 import { poolStats } from "../subprocess/session-pool.js";
 import { recordRequest, recordSpawnFailure, recordTokenUsage, recordToolCallParse, recordErrorClass } from "./metrics.js";
 import { pricingSnapshot } from "./pricing.js";
+import { advertisedModelIds, canonicalizeModelLabel as canonicalizeRegistryModelLabel } from "../models.js";
+import { discoverModels, discoveredLabelSet } from "./model-discovery.js";
 import { annotateClaudeUsage, modelFromResult, usageFromClaudeResult } from "./usage.js";
 import { UPSTREAM_SOFT_DEAD_MS, shouldTriggerSoftDead, buildSoftDeadDiagnostic, sampleDescendants } from "./watchdog.js";
 import type { DescendantInfo } from "./watchdog.js";
@@ -116,6 +118,15 @@ export function livenessProgressEnabled(env: NodeJS.ProcessEnv = process.env): b
 
 export function interimNarrationProgressEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.CLAUDE_PROXY_INTERIM_NARRATION_PROGRESS === "1";
+}
+
+// Runtime-phase narration ("🫧 Working: thinking…", tool_use start/wait) is
+// visible assistant content, so like liveness/interim narration it must be
+// opt-in: plain OpenAI-compatible clients treat every delta.content as answer
+// text and would otherwise save the narration into the output. Off by default
+// ⇒ the keepalive falls through to a standards-compliant SSE comment.
+export function phaseProgressEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.CLAUDE_PROXY_PHASE_PROGRESS === "1";
 }
 
 function endsAtNaturalNarrationBoundary(text: string): boolean {
@@ -238,20 +249,14 @@ export const fallbackCounters = {
 };
 
 /**
- * Reduce arbitrary client-provided model strings to one of a fixed set of
- * label values for /metrics. Bounded cardinality is critical — we never want
- * /metrics to grow unbounded labels from random model strings.
+ * Reduce arbitrary client-provided model strings to a bounded set of label
+ * values for /metrics. Labels come from the model registry plus any ids
+ * discovered via the Anthropic Models API (a bounded set); everything else
+ * collapses to "other" — we never want /metrics to grow unbounded labels
+ * from random model strings.
  */
-const KNOWN_MODEL_LABELS = new Set([
-  "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4",
-  "claude-sonnet-4-6", "claude-sonnet-4",
-  "claude-haiku-4-5-20251001", "claude-haiku-4-5", "claude-haiku-4",
-]);
 function canonicalizeModelLabel(model: string | undefined): string {
-  if (!model) return "unknown";
-  // Strip provider prefix (claude-proxy/ or claude-code-cli/).
-  const stripped = model.replace(/^(claude-proxy|claude-code-cli)\//, "");
-  return KNOWN_MODEL_LABELS.has(stripped) ? stripped : "other";
+  return canonicalizeRegistryModelLabel(model, discoveredLabelSet());
 }
 
 /**
@@ -851,7 +856,7 @@ async function handleStreamJsonRequest(
     }
 
     // Priority 2: Claude runtime phase (tool_use start, tool wait).
-    if (!hasRenderableAssistantContent(content)) {
+    if (!hasRenderableAssistantContent(content) && phaseProgressEnabled()) {
       const phase = phaseTracker.poll();
       if (phase) {
         content = "\n" + phase.text + "\n";
@@ -1459,7 +1464,7 @@ async function handleResponsesStreamJson(
       }
     }
 
-    if (!hasRenderableAssistantContent(content)) {
+    if (!hasRenderableAssistantContent(content) && phaseProgressEnabled()) {
       const phase = phaseTracker.poll();
       if (phase) {
         content = "\n" + phase.text + "\n";
@@ -1897,20 +1902,21 @@ async function handleResponsesStreaming(
 /**
  * Handle GET /v1/models
  *
- * Returns available models
+ * Returns the advertised registry models, merged with any models discovered
+ * live from the Anthropic Models API (when an ANTHROPIC_API_KEY is
+ * available — see src/server/model-discovery.ts). Discovery failures fall
+ * back to the static registry list.
  */
-export function handleModels(_req: Request, res: Response): void {
+export async function handleModels(_req: Request, res: Response): Promise<void> {
   const created = Math.floor(Date.now() / 1000);
-  const ids = [
-    "claude-opus-4-8",
-    "claude-opus-4-7",
-    "claude-opus-4-6",
-    "claude-sonnet-4-6",
-    "claude-haiku-4-5-20251001",
-    "claude-opus-4",
-    "claude-sonnet-4",
-    "claude-haiku-4",
-  ];
+  const ids = advertisedModelIds();
+  const seen = new Set(ids);
+  for (const id of await discoverModels()) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
+  }
   res.json({
     object: "list",
     data: ids.map((id) => ({
